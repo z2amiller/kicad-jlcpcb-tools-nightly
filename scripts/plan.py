@@ -68,6 +68,28 @@ def pick_versions(releases: list[dict]) -> list[str]:
     return versions
 
 
+def passed_over(releases: list[dict], versions: list[str]) -> list[str]:
+    """Name published releases newer than the chosen one that lack an installer.
+
+    A release still uploading is passed over for a night. One whose installer
+    was renamed (10.0.0 shipped kicad-10.0.0-1-x86_64.exe) would be passed
+    over for good, so the plan reports it instead of staying silent.
+    """
+    chosen = {version.rpartition(".")[0]: version for version in versions}
+    skipped = []
+    for release in releases:
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        tag = release["tag_name"]
+        series, _, patch = tag.rpartition(".")
+        if series not in LATEST_SERIES or not patch.isdigit():
+            continue
+        chosen_patch = int(chosen[series].rpartition(".")[2])
+        if int(patch) > chosen_patch and not has_installers(release):
+            skipped.append(tag)
+    return sorted(skipped, key=lambda tag: int(tag.rpartition(".")[2]))
+
+
 def resolve_sha(ls_remote: str, ref: str) -> str:
     """Find the commit a ref names in `git ls-remote` output.
 
@@ -172,10 +194,18 @@ def main() -> int:
         sha = resolve_sha(
             "" if FULL_SHA.fullmatch(ref) else ls_remote(repository, ref), ref
         )
-        versions = pick_versions(fetch_releases(os.environ.get("GITHUB_TOKEN", "")))
+        releases = fetch_releases(os.environ.get("GITHUB_TOKEN", ""))
+        versions = pick_versions(releases)
     except PlanError as error:
         print(f"::error::{error}")
         return 1
+    skipped = passed_over(releases, versions)
+    for tag in skipped:
+        print(
+            f"::warning::KiCad {tag} is published without both installers "
+            f"({' and '.join(installer_names(tag))}); an older complete release "
+            "was tested instead"
+        )
     outputs = {
         "repository": repository,
         "sha": sha,
@@ -198,6 +228,8 @@ def main() -> int:
                 f"Testing `{repository}` at `{ref}` (`{sha[:12]}`) "
                 f"on KiCad {', '.join(versions)}\n"
             )
+            for tag in skipped:
+                handle.write(f"KiCad {tag} is published without both installers\n")
     return 0
 
 

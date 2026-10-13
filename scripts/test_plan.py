@@ -67,6 +67,23 @@ class PickVersionsTest(unittest.TestCase):
             plan.pick_versions(releases)
 
 
+class PassedOverTest(unittest.TestCase):
+    def test_a_newer_release_without_both_installers_is_named(self):
+        # 10.0.0 shipped kicad-10.0.0-1-x86_64.exe: a renamed installer would
+        # be passed over for good, so the plan must say so, not stay silent.
+        releases = BASE + [release("10.0.6"), release("10.0.7", exe=False)]
+        versions = plan.pick_versions(releases)
+        self.assertEqual(plan.passed_over(releases, versions), ["10.0.7"])
+
+    def test_older_drafts_and_prereleases_are_not_named(self):
+        releases = BASE + [
+            release("10.0.4", exe=False),
+            release("10.0.7", draft=True),
+            release("10.0.8", prerelease=True),
+        ]
+        self.assertEqual(plan.passed_over(releases, plan.pick_versions(releases)), [])
+
+
 class ResolveShaTest(unittest.TestCase):
     LS_REMOTE = (
         f"{SHA_MAIN}\trefs/heads/main\n"
