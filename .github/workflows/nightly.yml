@@ -83,7 +83,7 @@ jobs:
         with:
           repository: ${{ needs.plan.outputs.repository }}
           ref: ${{ needs.plan.outputs.sha }}
-          path: target
+          path: kicad-jlcpcb-tools
       - name: Install KiCad ${{ matrix.kicad }}
         if: runner.os == 'Windows'
         shell: pwsh
@@ -112,7 +112,7 @@ jobs:
         run: '"$KICAD_PYTHON" -m pip install --disable-pip-version-check pytest'
       - name: Run the native KiCad tests
         timeout-minutes: 20
-        working-directory: target
+        working-directory: kicad-jlcpcb-tools
         run: >-
           "$KICAD_PYTHON" -m pytest -rs --require-native=kicad
           --kicad-major=${{ matrix.major }} -m native_kicad
