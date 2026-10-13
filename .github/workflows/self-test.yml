@@ -1,0 +1,29 @@
+---
+# Check this repository's own scripts and workflows.
+name: Self-test
+on:  # yamllint disable-line rule:truthy
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  self-test:
+    name: Scripts and workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+      - name: Unit-test plan.py
+        run: python3 -m unittest discover -s scripts -v
+      - name: Check the macOS install script
+        run: shellcheck scripts/install-kicad-macos.sh
+      - name: Parse the Windows install script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/install-kicad-windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | Format-List; exit 1 }
+      - name: Lint the workflows
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color

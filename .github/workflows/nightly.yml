@@ -1,0 +1,142 @@
+---
+# Run kicad-jlcpcb-tools' native KiCad tests in each KiCad's own Python on
+# Windows and macOS. A scheduled run tests Bouni/kicad-jlcpcb-tools main and is
+# skipped when that commit and those KiCad builds were already tested.
+name: Nightly native KiCad
+on:  # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Repository to test (owner/name)
+        type: string
+        default: Bouni/kicad-jlcpcb-tools
+      ref:
+        description: Branch, tag or full commit SHA
+        type: string
+        default: main
+      only_if_untested:
+        description: Skip the lanes if this commit and these KiCad builds were already tested
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      repository: ${{ steps.plan.outputs.repository }}
+      sha: ${{ steps.plan.outputs.sha }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      key: ${{ steps.plan.outputs.key }}
+    steps:
+      - name: Check out the nightly scripts
+        uses: actions/checkout@v7
+      - name: Resolve the commit and the KiCad builds
+        id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ inputs.repository }}
+          TARGET_REF: ${{ inputs.ref }}
+        run: python3 scripts/plan.py
+      - name: Look for an earlier run of this commit and these builds
+        id: tested
+        uses: actions/cache/restore@v6
+        with:
+          path: .tested
+          key: ${{ steps.plan.outputs.key }}
+          lookup-only: true
+      - name: Decide whether to run the lanes
+        id: decide
+        env:
+          SKIPPABLE: ${{ github.event_name == 'schedule' || inputs.only_if_untested }}
+          TESTED: ${{ steps.tested.outputs.cache-hit }}
+          KEY: ${{ steps.plan.outputs.key }}
+        run: |
+          if [ "$SKIPPABLE" = true ] && [ "$TESTED" = true ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Already tested: \`$KEY\`. The lanes are skipped." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  lanes:
+    name: ${{ matrix.label }} KiCad ${{ matrix.kicad }}
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the nightly scripts
+        uses: actions/checkout@v7
+        with:
+          path: nightly
+      - name: Check out ${{ needs.plan.outputs.repository }}
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ needs.plan.outputs.repository }}
+          ref: ${{ needs.plan.outputs.sha }}
+          path: target
+      - name: Install KiCad ${{ matrix.kicad }}
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./nightly/scripts/install-kicad-windows.ps1 -Version '${{ matrix.kicad }}'
+      - name: Install KiCad ${{ matrix.kicad }}
+        if: runner.os == 'macOS'
+        run: ./nightly/scripts/install-kicad-macos.sh '${{ matrix.kicad }}'
+      - name: Report the bundled Python, KiCad and wxPython
+        run: |
+          "$KICAD_PYTHON" - >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          import platform
+          import sys
+
+          import pcbnew
+          import wx
+
+          print(
+              f"{platform.system()} KiCad {pcbnew.GetBuildVersion()}: "
+              f"Python {sys.version.split()[0]}, wxPython {wx.version()}"
+          )
+          EOF
+      - name: Install pytest into KiCad's Python
+        timeout-minutes: 10
+        # pytest alone: the Python 3.9 bundles carry pip 22, which backtracks
+        # for many minutes over the project's dev extras.
+        run: '"$KICAD_PYTHON" -m pip install --disable-pip-version-check pytest'
+      - name: Run the native KiCad tests
+        timeout-minutes: 20
+        working-directory: target
+        run: >-
+          "$KICAD_PYTHON" -m pytest -rs --require-native=kicad
+          --kicad-major=${{ matrix.major }} -m native_kicad
+          --junitxml="$RUNNER_TEMP/junit.xml" tests
+      - name: Upload the test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-${{ matrix.label }}-${{ matrix.kicad }}
+          path: ${{ runner.temp }}/junit.xml
+          if-no-files-found: ignore
+
+  record:
+    name: Record this commit and these builds as tested
+    needs: [plan, lanes]
+    if: needs.plan.outputs.run == 'true' && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write the marker
+        env:
+          KEY: ${{ needs.plan.outputs.key }}
+        run: echo "$KEY" > .tested
+      - name: Save the marker
+        uses: actions/cache/save@v6
+        with:
+          path: .tested
+          key: ${{ needs.plan.outputs.key }}
