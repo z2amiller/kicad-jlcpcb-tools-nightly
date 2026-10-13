@@ -35,8 +35,8 @@ installers are uploaded.
 The scheduled run tests `Bouni/kicad-jlcpcb-tools` `main` once a night. It
 skips the lanes when the same commit was already tested on the same KiCad
 builds, whether that run passed or failed, so a failure is reported once per
-change. GitHub forgets a tested commit after seven days without a lookup, so a
-quiet week is re-tested once.
+change. The record lasts until the end of the ISO week, so a quiet week is
+re-tested once, which also catches changes to the runners themselves.
 
 ## Running it on a branch
 

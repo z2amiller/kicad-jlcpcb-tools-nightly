@@ -1,5 +1,6 @@
 """Unit tests for plan.py: python3 -m unittest discover -s scripts -v"""
 
+from datetime import date
 import json
 import unittest
 
@@ -163,6 +164,20 @@ class MatrixAndKeyTest(unittest.TestCase):
             lanes,
         )
         json.dumps(lanes)  # the workflow reads it with fromJSON
+
+    def test_the_key_carries_the_week_so_a_quiet_week_is_retested_once(self):
+        # Every lookup refreshes GitHub's 7-day cache eviction, so a nightly
+        # lookup would keep an unchanged key alive for good; the week expires it.
+        self.assertEqual(
+            plan.cache_key(SHA_MAIN, self.VERSIONS, week="2026w42"),
+            f"tested-{SHA_MAIN}-7.0.11-8.0.9-9.0.9-10.0.6-2026w42",
+        )
+
+    def test_the_week_is_the_iso_week_across_a_year_boundary(self):
+        self.assertEqual(plan.iso_week(date(2026, 10, 12)), "2026w42")
+        # 2027-01-01 is a Friday in ISO week 53 of 2026, like the Monday before.
+        self.assertEqual(plan.iso_week(date(2027, 1, 1)), "2026w53")
+        self.assertEqual(plan.iso_week(date(2026, 12, 28)), "2026w53")
 
     def test_the_key_names_the_commit_and_every_kicad(self):
         self.assertEqual(

@@ -7,6 +7,7 @@ prints them when run by hand.
 """
 
 from collections.abc import Mapping
+from datetime import date
 import json
 import os
 import re
@@ -127,9 +128,19 @@ def build_matrix(versions: list[str]) -> dict:
     }
 
 
-def cache_key(sha: str, versions: list[str]) -> str:
-    """Name a commit and KiCad set, so a scheduled run can skip a tested one."""
-    return "tested-" + "-".join([sha, *versions])
+def cache_key(sha: str, versions: list[str], week: str = "") -> str:
+    """Name a commit and KiCad set, so a scheduled run can skip a tested one.
+
+    Every lookup refreshes GitHub's 7-day cache eviction, so a nightly lookup
+    would keep an unchanged key alive for good; a week stamp makes a quiet
+    week re-test once, which also catches changes to the runners.
+    """
+    return "tested-" + "-".join([sha, *versions, *([week] if week else [])])
+
+
+def iso_week(day: date) -> str:
+    """Name the ISO week a day falls in, e.g. 2026w42."""
+    return day.strftime("%Gw%V")
 
 
 def target(environ: Mapping[str, str]) -> tuple[str, str]:
@@ -211,7 +222,7 @@ def main() -> int:
         "sha": sha,
         "versions": json.dumps(versions),
         "matrix": json.dumps(build_matrix(versions), separators=(",", ":")),
-        "key": cache_key(sha, versions),
+        "key": cache_key(sha, versions, iso_week(date.today())),
     }
     destination = os.environ.get("GITHUB_OUTPUT")
     if destination:
